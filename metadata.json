@@ -1,0 +1,7 @@
+{
+  "name": "Personal Organizer MVP",
+  "description": "A web-based personal organizer featuring local persistence, reminders with notifications, draggable sticky notes, and a calendar view.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
