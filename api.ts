@@ -23,6 +23,7 @@ const SEED_USER: any = {
 
 class ApiService {
   private DB_USERS_KEY = 'lumina_users_db';
+  private ACTIVE_SESSION_KEY = 'lumina_active_session';
 
   constructor() {
     this.initializeDB();
@@ -30,22 +31,30 @@ class ApiService {
 
   // Seed the DB with the hardcoded user if missing
   private initializeDB() {
-    const usersStr = localStorage.getItem(this.DB_USERS_KEY);
-    let users: any[] = usersStr ? JSON.parse(usersStr) : [];
+    try {
+        const usersStr = localStorage.getItem(this.DB_USERS_KEY);
+        let users: any[] = usersStr ? JSON.parse(usersStr) : [];
 
-    const exists = users.find(u => u.email === SEED_USER.email);
-    if (!exists) {
-      users.push(SEED_USER);
-      localStorage.setItem(this.DB_USERS_KEY, JSON.stringify(users));
-      console.log('API: Seeded User PavelHopson');
+        const exists = users.find(u => u.email === SEED_USER.email);
+        if (!exists) {
+        users.push(SEED_USER);
+        localStorage.setItem(this.DB_USERS_KEY, JSON.stringify(users));
+        console.log('API: Seeded User PavelHopson');
+        }
+    } catch (e) {
+        console.error("API Init Error:", e);
     }
   }
 
   // --- USERS ---
 
   public getAllUsers(): StoredUser[] {
-    const usersStr = localStorage.getItem(this.DB_USERS_KEY);
-    return usersStr ? JSON.parse(usersStr) : [];
+    try {
+        const usersStr = localStorage.getItem(this.DB_USERS_KEY);
+        return usersStr ? JSON.parse(usersStr) : [];
+    } catch (e) {
+        return [];
+    }
   }
 
   public login(email: string, password: string): User | null {
@@ -53,6 +62,7 @@ class ApiService {
     const user = users.find(u => u.email === email && u.password === password);
     if (user) {
       const { password, ...safeUser } = user;
+      this.updateActiveSession(safeUser as User);
       return safeUser as User;
     }
     return null;
@@ -69,26 +79,46 @@ class ApiService {
   }
 
   public updateUser(id: string, updates: Partial<User>): User | null {
-    const users = this.getAllUsers();
-    const index = users.findIndex(u => u.id === id);
-    if (index !== -1) {
-      users[index] = { ...users[index], ...updates };
-      localStorage.setItem(this.DB_USERS_KEY, JSON.stringify(users));
-      const { password, ...safeUser } = users[index];
-      return safeUser as User;
+    try {
+        const users = this.getAllUsers();
+        const index = users.findIndex(u => u.id === id);
+        if (index !== -1) {
+            users[index] = { ...users[index], ...updates };
+            localStorage.setItem(this.DB_USERS_KEY, JSON.stringify(users));
+            
+            const { password, ...safeUser } = users[index];
+            this.updateActiveSession(safeUser as User); // Sync active session immediately
+            return safeUser as User;
+        }
+    } catch (e) {
+        console.error("Update User Error:", e);
     }
     return null;
+  }
+
+  private updateActiveSession(user: User) {
+      localStorage.setItem(this.ACTIVE_SESSION_KEY, JSON.stringify(user));
   }
 
   // --- DATA ---
 
   public getData<T>(key: string, userId: string): T {
-    const val = localStorage.getItem(`${key}_${userId}`);
-    return val ? JSON.parse(val) : ([] as any);
+    try {
+        const val = localStorage.getItem(`${key}_${userId}`);
+        return val ? JSON.parse(val) : ([] as any);
+    } catch (e) {
+        console.error(`Get Data Error (${key}):`, e);
+        return [] as any;
+    }
   }
 
   public saveData<T>(key: string, userId: string, data: T) {
-    localStorage.setItem(`${key}_${userId}`, JSON.stringify(data));
+    try {
+        localStorage.setItem(`${key}_${userId}`, JSON.stringify(data));
+    } catch (e) {
+        console.error(`Save Data Error (${key}):`, e);
+        // Optional: Show a toast if quota exceeded
+    }
   }
 }
 

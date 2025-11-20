@@ -1,9 +1,10 @@
 
 import React, { useState, useEffect } from 'react';
 import { Reminder, Note, User } from '../types';
-import { BarChart3, Users, Database, AlertTriangle, Search, Trash2, RefreshCw, HardDrive, ShieldCheck } from 'lucide-react';
+import { BarChart3, Users, Database, AlertTriangle, Search, Trash2, RefreshCw, HardDrive, ShieldCheck, Stethoscope, CheckCircle2, XCircle } from 'lucide-react';
 import { useLanguage } from '../i18n';
 import { ResponsiveContainer, AreaChart, Area, XAxis, YAxis, Tooltip, CartesianGrid } from 'recharts';
+import { toLocalISOString } from '../utils';
 
 interface AdminPanelProps {
   reminders: Reminder[];
@@ -12,7 +13,7 @@ interface AdminPanelProps {
   setNotes: React.Dispatch<React.SetStateAction<Note[]>>;
 }
 
-type AdminTab = 'dashboard' | 'users' | 'content';
+type AdminTab = 'dashboard' | 'users' | 'content' | 'diagnostics';
 
 interface StoredUser extends User {
   password?: string;
@@ -24,6 +25,9 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
   const [activeTab, setActiveTab] = useState<AdminTab>('dashboard');
   const [dbUsers, setDbUsers] = useState<StoredUser[]>([]);
   
+  // Diagnostics State
+  const [testResults, setTestResults] = useState<{name: string, status: 'pass'|'fail'|'pending', msg: string}[]>([]);
+
   useEffect(() => {
       const usersDbStr = localStorage.getItem('lumina_users_db');
       if (usersDbStr) {
@@ -48,11 +52,66 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
     }
   };
 
+  const runDiagnostics = () => {
+      const tests: {name: string, status: 'pass'|'fail'|'pending', msg: string}[] = [
+          { name: 'Local Storage Access', status: 'pending', msg: 'Checking...' },
+          { name: 'Timezone Offset', status: 'pending', msg: 'Checking...' },
+          { name: 'Data Persistence', status: 'pending', msg: 'Checking...' },
+          { name: 'User Database', status: 'pending', msg: 'Checking...' }
+      ];
+      setTestResults(tests);
+
+      setTimeout(() => {
+          const results = [...tests];
+          
+          // 1. LS Check
+          try {
+              localStorage.setItem('test_key', 'valhalla');
+              const val = localStorage.getItem('test_key');
+              localStorage.removeItem('test_key');
+              if (val === 'valhalla') {
+                  results[0] = { name: 'Local Storage Access', status: 'pass', msg: 'Read/Write OK' };
+              } else {
+                  results[0] = { name: 'Local Storage Access', status: 'fail', msg: 'Write Failed' };
+              }
+          } catch (e) {
+              results[0] = { name: 'Local Storage Access', status: 'fail', msg: 'Access Denied' };
+          }
+
+          // 2. Timezone
+          const now = new Date();
+          const localIso = toLocalISOString(now);
+          if (localIso.includes('T')) {
+               results[1] = { name: 'Timezone Offset', status: 'pass', msg: `ISO: ${localIso} (OK)` };
+          } else {
+               results[1] = { name: 'Timezone Offset', status: 'fail', msg: 'Invalid ISO format' };
+          }
+
+          // 3. Persistence
+          const session = localStorage.getItem('lumina_active_session');
+          if (session) {
+              results[2] = { name: 'Data Persistence', status: 'pass', msg: 'Session Active' };
+          } else {
+              results[2] = { name: 'Data Persistence', status: 'fail', msg: 'No Active Session' };
+          }
+
+          // 4. User DB
+          if (dbUsers.length > 0) {
+              results[3] = { name: 'User Database', status: 'pass', msg: `${dbUsers.length} Users Found` };
+          } else {
+              results[3] = { name: 'User Database', status: 'fail', msg: 'Database Empty' };
+          }
+
+          setTestResults(results);
+      }, 1000);
+  };
+
   const getTabLabel = (tab: AdminTab) => {
       switch(tab) {
           case 'dashboard': return t('admin.tab_dashboard');
           case 'users': return t('admin.tab_users');
           case 'content': return t('admin.tab_content');
+          case 'diagnostics': return 'Diagnostics';
           default: return tab;
       }
   }
@@ -188,7 +247,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
                   <div className="font-medium text-slate-800">{u.name}</div>
                   <div className="text-xs text-slate-400">{u.email}</div>
               </td>
-              <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700 uppercase">Free</span></td>
+              <td className="px-4 py-3"><span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-200 text-slate-700 uppercase">{u.plan}</span></td>
               <td className="px-4 py-3">
                   <span className="px-2 py-0.5 rounded-full bg-green-100 text-green-700 text-xs font-bold">User</span>
               </td>
@@ -246,6 +305,39 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
     </div>
   );
 
+  const renderDiagnostics = () => (
+      <div className="space-y-6 animate-in fade-in">
+          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
+              <div className="flex justify-between items-center mb-6">
+                  <h3 className="font-bold text-slate-800 flex items-center gap-2">
+                      <Stethoscope className="w-5 h-5 text-blue-600" />
+                      System Diagnostics
+                  </h3>
+                  <button onClick={runDiagnostics} className="px-4 py-2 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700">
+                      Run Tests
+                  </button>
+              </div>
+              
+              <div className="space-y-3">
+                  {testResults.length === 0 && <div className="text-center py-8 text-slate-400">Run tests to check system integrity.</div>}
+                  {testResults.map((res, i) => (
+                      <div key={i} className="flex items-center justify-between p-3 bg-slate-50 rounded-lg border border-slate-100">
+                          <div className="flex items-center gap-3">
+                              {res.status === 'pass' && <CheckCircle2 className="w-5 h-5 text-green-500" />}
+                              {res.status === 'fail' && <XCircle className="w-5 h-5 text-red-500" />}
+                              {res.status === 'pending' && <RefreshCw className="w-5 h-5 text-slate-400 animate-spin" />}
+                              <span className="font-medium text-slate-700">{res.name}</span>
+                          </div>
+                          <span className={`text-sm font-mono ${res.status === 'pass' ? 'text-green-600' : res.status === 'fail' ? 'text-red-600' : 'text-slate-400'}`}>
+                              {res.msg}
+                          </span>
+                      </div>
+                  ))}
+              </div>
+          </div>
+      </div>
+  );
+
   return (
     <div className="p-8 h-full flex flex-col w-full overflow-y-auto bg-slate-100/50">
       <div className="flex justify-between items-center mb-8">
@@ -257,7 +349,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
             <p className="text-slate-500 mt-1">{t('admin.subtitle')}</p>
         </div>
         <div className="flex bg-white p-1 rounded-lg border border-slate-200 shadow-sm">
-            {(['dashboard', 'users', 'content'] as const).map(tab => (
+            {(['dashboard', 'users', 'content', 'diagnostics'] as const).map(tab => (
                 <button
                     key={tab}
                     onClick={() => setActiveTab(tab)}
@@ -277,6 +369,7 @@ const AdminPanel: React.FC<AdminPanelProps> = ({ reminders, notes, setReminders,
         {activeTab === 'dashboard' && renderDashboard()}
         {activeTab === 'users' && renderUsers()}
         {activeTab === 'content' && renderContent()}
+        {activeTab === 'diagnostics' && renderDiagnostics()}
       </div>
     </div>
   );

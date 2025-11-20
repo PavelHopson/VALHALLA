@@ -1,24 +1,34 @@
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import Navigation from './components/Navigation';
-import ReminderView from './components/ReminderView';
-import StickerBoard from './components/StickerBoard';
-import CalendarView from './components/CalendarView';
-import WorkoutView from './components/WorkoutView';
-import SettingsView from './components/SettingsView';
-import AdminPanel from './components/AdminPanel';
-import Dashboard from './components/Dashboard';
-import GlobalSearch from './components/GlobalSearch';
 import Auth from './components/Auth';
 import AdBanner from './components/AdBanner';
 import SubscriptionModal from './components/SubscriptionModal';
 import Onboarding from './components/Onboarding';
 
 import { Reminder, Note, ViewMode, RepeatType, Priority, User, Category, Routine, WorkoutLog, PlanTier, ReminderStatus, Theme } from './types';
-import { generateId, playNotificationSound, getNextOccurrence, calculateLevel, getNextLevelXp } from './utils';
-import { BellRing, X, Search, Trophy, Hammer } from 'lucide-react';
+import { generateId, playNotificationSound, getNextOccurrence, calculateLevel, getNextLevelXp, toLocalISOString } from './utils';
+import { BellRing, X, Search, Trophy, Hammer, WifiOff, Wifi, Loader2 } from 'lucide-react';
 import { LanguageProvider, useLanguage } from './i18n';
-import { api } from './api'; // Use the API layer
+import { api } from './api'; 
+
+// --- LAZY LOAD HEAVY COMPONENTS ---
+const Dashboard = lazy(() => import('./components/Dashboard'));
+const ReminderView = lazy(() => import('./components/ReminderView'));
+const StickerBoard = lazy(() => import('./components/StickerBoard'));
+const CalendarView = lazy(() => import('./components/CalendarView'));
+const WorkoutView = lazy(() => import('./components/WorkoutView'));
+const SettingsView = lazy(() => import('./components/SettingsView'));
+const AdminPanel = lazy(() => import('./components/AdminPanel'));
+const GlobalSearch = lazy(() => import('./components/GlobalSearch'));
+
+// --- LOADING SCREEN ---
+const LoadingScreen = () => (
+  <div className="h-full w-full flex flex-col items-center justify-center bg-slate-50 dark:bg-slate-900 text-slate-400 animate-in fade-in duration-200">
+    <Hammer className="w-8 h-8 animate-bounce mb-4 text-slate-300 dark:text-slate-700" />
+    <Loader2 className="w-6 h-6 animate-spin text-blue-600" />
+  </div>
+);
 
 const AppContent: React.FC = () => {
   const { t } = useLanguage();
@@ -35,6 +45,7 @@ const AppContent: React.FC = () => {
   const [isSubscriptionOpen, setIsSubscriptionOpen] = useState(false);
   const [showOnboarding, setShowOnboarding] = useState(false);
   const [isDataLoaded, setIsDataLoaded] = useState(false);
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
 
   // -- Data State --
   const [reminders, setReminders] = useState<Reminder[]>([]);
@@ -42,13 +53,14 @@ const AppContent: React.FC = () => {
   const [routines, setRoutines] = useState<Routine[]>([]);
   const [workoutLogs, setWorkoutLogs] = useState<WorkoutLog[]>([]);
 
-  const [activeToast, setActiveToast] = useState<{title: string, desc: string} | null>(null);
+  const [activeToast, setActiveToast] = useState<{title: string, desc: string, icon?: any} | null>(null);
   const [levelUpToast, setLevelUpToast] = useState<number | null>(null);
 
   // -- Reminder Modal State --
   const [isReminderModalOpen, setIsReminderModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [modalData, setModalData] = useState({
+  
+  const DEFAULT_MODAL_DATA = {
     title: '',
     desc: '',
     date: '',
@@ -56,7 +68,9 @@ const AppContent: React.FC = () => {
     priority: Priority.MEDIUM,
     category: Category.PERSONAL,
     subtasks: [] as {id: string, title: string, isCompleted: boolean}[]
-  });
+  };
+
+  const [modalData, setModalData] = useState(DEFAULT_MODAL_DATA);
   const [selectedDay, setSelectedDay] = useState<Date | null>(null);
 
   // -- Initialization --
@@ -66,7 +80,6 @@ const AppContent: React.FC = () => {
       const freshUser = api.getUserById(user.id);
       if (freshUser && JSON.stringify(freshUser) !== JSON.stringify(user)) {
           setUser(freshUser);
-          localStorage.setItem('lumina_active_session', JSON.stringify(freshUser));
       }
 
       if (freshUser && !freshUser.hasSeenOnboarding) {
@@ -89,24 +102,73 @@ const AppContent: React.FC = () => {
       setWorkoutLogs([]);
       setIsDataLoaded(false);
     }
-  }, [user?.id]); // Run when ID changes or mounts
+  }, [user?.id]); 
 
-  // -- Persistence (Auto-Save) --
+  // -- Offline/Online Listeners --
+  useEffect(() => {
+      const handleOnline = () => {
+          setIsOnline(true);
+          setActiveToast({ title: 'Connected', desc: 'Ravens are flying again.', icon: Wifi });
+      };
+      const handleOffline = () => {
+          setIsOnline(false);
+          setActiveToast({ title: 'Offline Mode', desc: 'Running locally. Changes saved to device.', icon: WifiOff });
+      };
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
+
+  // -- Persistence (Debounced Auto-Save) --
   useEffect(() => { 
-      if (user && isDataLoaded) api.saveData('reminders', user.id, reminders); 
+      if (!user || !isDataLoaded) return;
+      const handler = setTimeout(() => {
+          api.saveData('reminders', user.id, reminders);
+      }, 500); // Reduced to 500ms for snappier saves
+      return () => clearTimeout(handler);
   }, [reminders, user, isDataLoaded]);
 
   useEffect(() => { 
-      if (user && isDataLoaded) api.saveData('notes', user.id, notes); 
+      if (!user || !isDataLoaded) return;
+      const handler = setTimeout(() => {
+          api.saveData('notes', user.id, notes);
+      }, 500);
+      return () => clearTimeout(handler);
   }, [notes, user, isDataLoaded]);
 
   useEffect(() => { 
-      if (user && isDataLoaded) api.saveData('routines', user.id, routines); 
+      if (!user || !isDataLoaded) return;
+      const handler = setTimeout(() => {
+          api.saveData('routines', user.id, routines);
+      }, 500);
+      return () => clearTimeout(handler);
   }, [routines, user, isDataLoaded]);
 
   useEffect(() => { 
-      if (user && isDataLoaded) api.saveData('workout_logs', user.id, workoutLogs); 
+      if (!user || !isDataLoaded) return;
+      const handler = setTimeout(() => {
+          api.saveData('workout_logs', user.id, workoutLogs);
+      }, 500);
+      return () => clearTimeout(handler);
   }, [workoutLogs, user, isDataLoaded]);
+
+  // -- SAFETY NET: Save on close/reload --
+  useEffect(() => {
+      const handleBeforeUnload = () => {
+          if (user && isDataLoaded) {
+              // We use the synchronous nature of localStorage here to ensure write
+              api.saveData('reminders', user.id, reminders);
+              api.saveData('notes', user.id, notes);
+              api.saveData('routines', user.id, routines);
+              api.saveData('workout_logs', user.id, workoutLogs);
+          }
+      };
+      window.addEventListener('beforeunload', handleBeforeUnload);
+      return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [user, isDataLoaded, reminders, notes, routines, workoutLogs]);
 
   // -- Gamification Logic --
   const addXp = (amount: number) => {
@@ -192,6 +254,15 @@ const AppContent: React.FC = () => {
       alert(`Successfully upgraded to ${plan}!`);
   };
 
+  const handleUpdateUser = (updates: Partial<User>) => {
+      if (!user) return;
+      const updated = api.updateUser(user.id, updates);
+      if (updated) {
+          setUser(updated);
+          setActiveToast({ title: 'Profile Updated', desc: 'Your identity has been forged.' });
+      }
+  };
+
   const handleThemeChange = (theme: Theme) => {
       if (!user) return;
       const updated = api.updateUser(user.id, { theme });
@@ -205,6 +276,19 @@ const AppContent: React.FC = () => {
       setShowOnboarding(false);
   };
 
+  // Modal Helper to RESET form state
+  const resetForm = () => {
+      setModalData(DEFAULT_MODAL_DATA);
+      setEditingId(null);
+  };
+
+  const handleOpenCreateModal = () => {
+      resetForm();
+      // Set default date to now (local time)
+      setModalData(prev => ({...prev, date: toLocalISOString(new Date()) }));
+      setIsReminderModalOpen(true);
+  };
+
   // Reminder Logic
   const saveReminder = (r: Partial<Reminder>) => {
     if (!user) return;
@@ -213,6 +297,7 @@ const AppContent: React.FC = () => {
         id: r.id || generateId(),
         title: r.title || 'New Task',
         description: r.description || '',
+        // IMPORTANT: Ensure we have a valid date
         dueDateTime: r.dueDateTime || new Date().toISOString(),
         repeatType: r.repeatType || RepeatType.NONE,
         priority: r.priority || Priority.MEDIUM,
@@ -278,16 +363,19 @@ const AppContent: React.FC = () => {
   if (!user) return <Auth onLogin={handleLogin} />;
 
   return (
-    <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 transition-colors duration-300">
+    <div className="flex flex-col md:flex-row h-screen w-screen overflow-hidden bg-slate-50 dark:bg-slate-900 font-sans text-slate-900 dark:text-slate-100 transition-colors duration-300 fixed inset-0">
       {/* Mobile Header */}
-      <div className="md:hidden bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 p-4 flex justify-between items-center shrink-0 z-20">
+      <div className="md:hidden bg-white dark:bg-slate-950 border-b border-slate-200 dark:border-slate-800 p-4 pt-safe flex justify-between items-center shrink-0 z-20">
           <div className="flex items-center gap-2">
               <div className="bg-slate-900 p-1.5 rounded-lg">
                   <Hammer className="w-4 h-4 text-white" />
               </div>
               <span className="font-bold text-slate-800 dark:text-white tracking-widest uppercase font-serif">VALHALLA</span>
           </div>
-          <button onClick={() => setIsSearchOpen(true)} className="p-2 bg-slate-50 dark:bg-slate-800 text-slate-500 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"><Search className="w-5 h-5" /></button>
+          <div className="flex gap-2">
+              {!isOnline && <div className="p-2 bg-slate-100 rounded-full text-slate-400"><WifiOff className="w-5 h-5" /></div>}
+              <button onClick={() => setIsSearchOpen(true)} className="p-2 bg-slate-50 dark:bg-slate-800 text-slate-500 rounded-full hover:bg-slate-100 dark:hover:bg-slate-700"><Search className="w-5 h-5" /></button>
+          </div>
       </div>
 
       <Navigation 
@@ -298,42 +386,48 @@ const AppContent: React.FC = () => {
         onUpgrade={() => setIsSubscriptionOpen(true)}
       />
       
-      <main className="flex-1 h-full relative flex flex-col min-w-0 overflow-hidden mb-[60px] md:mb-0">
-        {currentView === 'dashboard' && <Dashboard reminders={reminders} setView={setCurrentView} user={user} />}
-        {currentView === 'reminders' && <ReminderView 
-            reminders={reminders} 
-            toggleComplete={toggleComplete}
-            deleteReminder={deleteReminder}
-            onOpenCreateModal={() => { setEditingId(null); setIsReminderModalOpen(true); }}
-            onEditReminder={(r) => { setEditingId(r.id); setModalData({...r} as any); setIsReminderModalOpen(true); }}
-            onAddSmartTask={(r) => saveReminder(r)}
-            onStatusChange={changeStatus}
-            userPlan={user.plan}
-            onUpgrade={() => setIsSubscriptionOpen(true)}
-        />}
-        {currentView === 'stickers' && <StickerBoard notes={notes} setNotes={setNotes} />}
-        {currentView === 'calendar' && <CalendarView reminders={reminders} onSelectDate={(d) => { setSelectedDay(d); }} />}
-        {currentView === 'workouts' && <WorkoutView routines={routines} logs={workoutLogs} setRoutines={setRoutines} setLogs={setWorkoutLogs} />}
-        {currentView === 'settings' && <SettingsView 
-            remindersCount={reminders.length} 
-            notesCount={notes.length} 
-            user={user}
-            onLogout={() => setUser(null)}
-            setReminders={setReminders}
-            setNotes={setNotes}
-            onUpdateTheme={handleThemeChange}
-            onUpgrade={() => setIsSubscriptionOpen(true)}
-        />}
-        {currentView === 'admin' && <AdminPanel reminders={reminders} notes={notes} setReminders={setReminders} setNotes={setNotes} />}
+      {/* Main Content - Safe area padding at bottom for mobile nav */}
+      <main className="flex-1 h-full relative flex flex-col min-w-0 overflow-hidden pb-[70px] md:pb-0">
+        <Suspense fallback={<LoadingScreen />}>
+            {currentView === 'dashboard' && <Dashboard reminders={reminders} setView={setCurrentView} user={user} />}
+            {currentView === 'reminders' && <ReminderView 
+                reminders={reminders} 
+                toggleComplete={toggleComplete}
+                deleteReminder={deleteReminder}
+                onOpenCreateModal={handleOpenCreateModal}
+                onEditReminder={(r) => { setEditingId(r.id); setModalData({...r} as any); setIsReminderModalOpen(true); }}
+                onAddSmartTask={(r) => saveReminder(r)}
+                onStatusChange={changeStatus}
+                userPlan={user.plan}
+                onUpgrade={() => setIsSubscriptionOpen(true)}
+            />}
+            {currentView === 'stickers' && <StickerBoard notes={notes} setNotes={setNotes} />}
+            {currentView === 'calendar' && <CalendarView reminders={reminders} onSelectDate={(d) => { setSelectedDay(d); }} />}
+            {currentView === 'workouts' && <WorkoutView routines={routines} logs={workoutLogs} setRoutines={setRoutines} setLogs={setWorkoutLogs} />}
+            {currentView === 'settings' && <SettingsView 
+                remindersCount={reminders.length} 
+                notesCount={notes.length} 
+                user={user}
+                onLogout={() => setUser(null)}
+                setReminders={setReminders}
+                setNotes={setNotes}
+                onUpdateTheme={handleThemeChange}
+                onUpgrade={() => setIsSubscriptionOpen(true)}
+                onUpdateUser={handleUpdateUser}
+            />}
+            {currentView === 'admin' && <AdminPanel reminders={reminders} notes={notes} setReminders={setReminders} setNotes={setNotes} />}
+        </Suspense>
       </main>
 
       {/* Overlays */}
-      <GlobalSearch isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} reminders={reminders} notes={notes} onNavigate={setCurrentView} />
+      <Suspense fallback={null}>
+        <GlobalSearch isOpen={isSearchOpen} onClose={() => setIsSearchOpen(false)} reminders={reminders} notes={notes} onNavigate={setCurrentView} />
+      </Suspense>
       
-      {/* Create Reminder Modal */}
+      {/* Create Reminder Modal - Bottom Sheet on Mobile */}
       {isReminderModalOpen && (
-        <div className="fixed inset-0 bg-slate-900/60 flex items-end md:items-center justify-center z-[60] backdrop-blur-sm p-0 md:p-4">
-          <div className="bg-white dark:bg-slate-950 w-full rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg overflow-hidden flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-slate-900/60 flex items-end md:items-center justify-center z-[60] backdrop-blur-sm p-0 md:p-4 transition-all">
+          <div className="bg-white dark:bg-slate-950 w-full rounded-t-2xl md:rounded-2xl shadow-2xl md:max-w-lg overflow-hidden flex flex-col max-h-[90vh] animate-in slide-in-from-bottom-10 duration-300 pb-safe">
             <div className="p-6 border-b border-slate-100 dark:border-slate-800 flex justify-between items-center bg-slate-50/50 dark:bg-slate-900/50">
               <h3 className="text-xl font-bold dark:text-white">{editingId ? t('tasks.modal_title').replace('New', 'Edit') : t('tasks.modal_title')}</h3>
               <button onClick={() => setIsReminderModalOpen(false)}><X className="w-6 h-6 text-slate-400" /></button>
@@ -356,8 +450,8 @@ const AppContent: React.FC = () => {
 
       {/* Day Detail Modal */}
       {selectedDay && (
-         <div className="fixed inset-0 bg-slate-900/60 flex items-center justify-center z-[55] backdrop-blur-sm p-4">
-             <div className="bg-white dark:bg-slate-950 w-full max-w-md rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh]">
+         <div className="fixed inset-0 bg-slate-900/60 flex items-end md:items-center justify-center z-[55] backdrop-blur-sm p-0 md:p-4">
+             <div className="bg-white dark:bg-slate-950 w-full md:max-w-md rounded-t-2xl md:rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[80vh] animate-in slide-in-from-bottom-10 pb-safe">
                 <div className="p-4 border-b border-slate-100 dark:border-slate-800 bg-slate-50 dark:bg-slate-900 flex justify-between items-center">
                     <h3 className="font-bold dark:text-white">{selectedDay.toLocaleDateString()}</h3>
                     <button onClick={() => setSelectedDay(null)}><X className="w-5 h-5 text-slate-500" /></button>
@@ -369,8 +463,23 @@ const AppContent: React.FC = () => {
                             <div><p className="font-medium text-sm dark:text-white">{r.title}</p></div>
                         </div>
                     ))}
+                    {reminders.filter(r => new Date(r.dueDateTime).toDateString() === selectedDay.toDateString()).length === 0 && (
+                        <p className="text-center text-slate-400 italic py-4">No quests.</p>
+                    )}
                 </div>
-                <div className="p-4 border-t border-slate-100 dark:border-slate-800"><button onClick={() => { setModalData({...modalData, date: selectedDay.toISOString().slice(0,16)}); setIsReminderModalOpen(true); setSelectedDay(null); }} className="w-full py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm">{t('tasks.new_task')}</button></div>
+                <div className="p-4 border-t border-slate-100 dark:border-slate-800">
+                    <button 
+                        onClick={() => { 
+                            resetForm(); // Ensure clean state
+                            setModalData(prev => ({...prev, date: toLocalISOString(selectedDay) })); // Use Local ISO
+                            setIsReminderModalOpen(true); 
+                            setSelectedDay(null); 
+                        }} 
+                        className="w-full py-3 bg-blue-600 text-white rounded-xl font-semibold text-sm"
+                    >
+                        {t('tasks.new_task')}
+                    </button>
+                </div>
              </div>
          </div>
       )}
@@ -386,17 +495,19 @@ const AppContent: React.FC = () => {
       {/* Ad Banner */}
       {user?.plan === PlanTier.FREE && <AdBanner onUpgrade={() => setIsSubscriptionOpen(true)} onClose={() => {}} />}
 
-      {/* Notification Toast */}
+      {/* Notification Toast - Higher on mobile */}
       {activeToast && (
-        <div className="fixed bottom-20 md:bottom-8 right-4 bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-100 dark:border-slate-800 p-4 max-w-sm z-[100] flex items-start gap-4 cursor-pointer" onClick={() => { setCurrentView('reminders'); setActiveToast(null); }}>
-          <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full text-blue-600"><BellRing className="w-6 h-6" /></div>
+        <div className="fixed top-4 md:top-auto md:bottom-8 right-4 left-4 md:left-auto bg-white dark:bg-slate-900 rounded-xl shadow-2xl border border-slate-100 dark:border-slate-800 p-4 max-w-sm z-[100] flex items-start gap-4 cursor-pointer animate-in slide-in-from-top-2 md:slide-in-from-bottom-2" onClick={() => { if (activeToast.title !== 'Offline Mode' && activeToast.title !== 'Connected') setCurrentView('reminders'); setActiveToast(null); }}>
+          <div className="p-3 bg-blue-100 dark:bg-blue-900 rounded-full text-blue-600">
+             {activeToast.icon ? React.createElement(activeToast.icon, { className: "w-6 h-6" }) : <BellRing className="w-6 h-6" />}
+          </div>
           <div><h4 className="font-bold dark:text-white">{activeToast.title}</h4><p className="text-sm text-slate-500">{activeToast.desc}</p></div>
         </div>
       )}
 
       {/* Level Up Toast */}
       {levelUpToast && (
-          <div className="fixed top-8 left-1/2 -translate-x-1/2 bg-yellow-400 text-slate-900 px-6 py-3 rounded-full shadow-2xl z-[100] font-bold flex items-center gap-2 animate-bounce">
+          <div className="fixed top-16 left-1/2 -translate-x-1/2 bg-yellow-400 text-slate-900 px-6 py-3 rounded-full shadow-2xl z-[100] font-bold flex items-center gap-2 animate-bounce whitespace-nowrap">
               <Trophy className="w-5 h-5" />
               {t('game.toast_levelup')} {levelUpToast}!
           </div>

@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import { Reminder, Note, ViewMode, User, NewsArticle, PlanTier } from '../types';
 import { getGreetingKey, formatDate, getPriorityColor, getNextLevelXp, THEME_COLORS } from '../utils';
-import { CloudSun, Clock, ArrowRight, Play, Pause, RotateCcw, Newspaper, ExternalLink, RefreshCw, Zap, Skull } from 'lucide-react';
+import { CloudSun, Clock, ArrowRight, Play, Pause, RotateCcw, Newspaper, ExternalLink, RefreshCw, Zap, Skull, WifiOff } from 'lucide-react';
 import { useLanguage } from '../i18n';
 
 interface DashboardProps {
@@ -16,6 +16,7 @@ type NewsCategory = 'general' | 'tech' | 'business' | 'science' | 'sports';
 const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
   const { language, t } = useLanguage();
   const theme = user?.theme && user.plan !== PlanTier.FREE ? THEME_COLORS[user.theme] : THEME_COLORS.blue;
+  const [isOnline, setIsOnline] = useState(navigator.onLine);
   
   // Stats
   const pendingCount = reminders.filter(r => !r.isCompleted).length;
@@ -35,6 +36,17 @@ const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
   const [newsLoading, setNewsLoading] = useState(true);
   const [newsError, setNewsError] = useState(false);
   const [newsCategory, setNewsCategory] = useState<NewsCategory>('general');
+
+  useEffect(() => {
+      const handleOnline = () => setIsOnline(true);
+      const handleOffline = () => setIsOnline(false);
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      return () => {
+          window.removeEventListener('online', handleOnline);
+          window.removeEventListener('offline', handleOffline);
+      };
+  }, []);
 
   useEffect(() => {
     let interval: any = null;
@@ -88,6 +100,11 @@ const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
   };
 
   useEffect(() => {
+      if (!isOnline) {
+          setNewsLoading(false);
+          return;
+      }
+
       const fetchNews = async () => {
           setNewsLoading(true);
           setNewsError(false);
@@ -118,14 +135,22 @@ const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
           }
       };
       fetchNews();
-  }, [newsCategory, language]);
+  }, [newsCategory, language, isOnline]);
 
   return (
     <div className="p-4 md:p-8 h-full flex flex-col max-w-6xl mx-auto w-full overflow-y-auto pb-24 md:pb-8">
       {/* Header */}
-      <div className="mb-6 md:mb-8 animate-in slide-in-from-top-4 duration-500">
-        <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight font-serif uppercase">{t(getGreetingKey())}, {user?.name || 'Warrior'}.</h1>
-        <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm md:text-base">{t('dashboard.welcome')}</p>
+      <div className="mb-6 md:mb-8 animate-in slide-in-from-top-4 duration-500 flex justify-between items-start">
+        <div>
+            <h1 className="text-2xl md:text-3xl font-bold text-slate-900 dark:text-white tracking-tight font-serif uppercase">{t(getGreetingKey())}, {user?.name || 'Warrior'}.</h1>
+            <p className="text-slate-500 dark:text-slate-400 mt-1 text-sm md:text-base">{t('dashboard.welcome')}</p>
+        </div>
+        {!isOnline && (
+            <div className="bg-slate-200 dark:bg-slate-800 px-3 py-1 rounded-full flex items-center gap-2 text-xs font-bold text-slate-500 animate-pulse">
+                <WifiOff className="w-3 h-3" />
+                Offline
+            </div>
+        )}
       </div>
       
       {/* Gamification Bar (Pro) */}
@@ -264,11 +289,12 @@ const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
                     <button
                         key={cat}
                         onClick={() => setNewsCategory(cat)}
+                        disabled={!isOnline}
                         className={`px-3 py-1.5 text-xs font-bold rounded-sm whitespace-nowrap transition-all ${
                             newsCategory === cat 
                             ? 'bg-slate-900 dark:bg-slate-100 text-white dark:text-slate-900 shadow' 
                             : 'text-slate-500 hover:bg-slate-50 dark:hover:bg-slate-700'
-                        }`}
+                        } ${!isOnline ? 'opacity-50 cursor-not-allowed' : ''}`}
                     >
                         {t(`news.cat_${cat}`)}
                     </button>
@@ -276,7 +302,13 @@ const Dashboard: React.FC<DashboardProps> = ({ reminders, setView, user }) => {
             </div>
         </div>
 
-        {newsLoading ? (
+        {!isOnline ? (
+             <div className="bg-slate-100 dark:bg-slate-800/50 border border-slate-200 dark:border-slate-700 rounded-xl p-12 text-center flex flex-col items-center justify-center">
+                 <WifiOff className="w-12 h-12 text-slate-400 mb-4" />
+                 <h3 className="text-lg font-bold text-slate-600 dark:text-slate-300">Offline Mode</h3>
+                 <p className="text-sm text-slate-500 max-w-xs mx-auto mt-2">Ravens cannot fly in this storm. Reconnect to the world tree to receive news.</p>
+             </div>
+        ) : newsLoading ? (
             <div className="bg-white dark:bg-slate-800 rounded-sm p-12 text-center border border-slate-200 dark:border-slate-700">
                 <RefreshCw className="w-8 h-8 text-blue-500 animate-spin mx-auto mb-2" />
                 <p className="text-slate-400 text-sm">{t('news.loading')}</p>

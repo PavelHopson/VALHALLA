@@ -33,7 +33,11 @@ export const playNotificationSound = () => {
 };
 
 export const formatDate = (isoString: string, locale: 'en' | 'ru' = 'en'): string => {
+  if (!isoString) return '';
   const date = new Date(isoString);
+  // Check for invalid date
+  if (isNaN(date.getTime())) return 'Invalid Date';
+  
   const locales = locale === 'ru' ? 'ru-RU' : 'en-US';
   return new Intl.DateTimeFormat(locales, {
     month: 'short',
@@ -41,6 +45,14 @@ export const formatDate = (isoString: string, locale: 'en' | 'ru' = 'en'): strin
     hour: 'numeric',
     minute: '2-digit',
   }).format(date);
+};
+
+// Converts a date to a string acceptable by <input type="datetime-local">
+// ensuring it stays in the LOCAL timezone, not UTC.
+export const toLocalISOString = (date: Date): string => {
+  const tzOffset = date.getTimezoneOffset() * 60000; // offset in milliseconds
+  const localISOTime = (new Date(date.getTime() - tzOffset)).toISOString().slice(0, 16);
+  return localISOTime;
 };
 
 export const isSameDay = (d1: Date, d2: Date): boolean => {
@@ -143,33 +155,33 @@ export const parseSmartTask = (input: string) => {
   };
 
   // 1. Extract Priority
-  if (lower.includes('!high') || lower.includes('!important')) {
+  if (lower.includes('!high') || lower.includes('!important') || lower.includes('!важно')) {
     result.priority = Priority.HIGH;
-    result.title = result.title.replace(/!high|!important/gi, '');
-  } else if (lower.includes('!low')) {
+    result.title = result.title.replace(/!high|!important|!важно/gi, '');
+  } else if (lower.includes('!low') || lower.includes('!низко')) {
     result.priority = Priority.LOW;
-    result.title = result.title.replace(/!low/gi, '');
+    result.title = result.title.replace(/!low|!низко/gi, '');
   }
 
   // 2. Extract Date keywords
   const now = new Date();
-  if (lower.includes('tomorrow')) {
+  if (lower.includes('tomorrow') || lower.includes('завтра')) {
     const d = new Date();
     d.setDate(d.getDate() + 1);
     d.setHours(9, 0, 0, 0);
     result.date = d;
-    result.title = result.title.replace(/tomorrow/gi, '');
-  } else if (lower.includes('tonight')) {
+    result.title = result.title.replace(/tomorrow|завтра/gi, '');
+  } else if (lower.includes('tonight') || lower.includes('вечером')) {
     const d = new Date();
     d.setHours(19, 0, 0, 0);
     result.date = d;
-    result.title = result.title.replace(/tonight/gi, '');
-  } else if (lower.includes('next week')) {
+    result.title = result.title.replace(/tonight|вечером/gi, '');
+  } else if (lower.includes('next week') || lower.includes('на след неделе')) {
     const d = new Date();
     d.setDate(d.getDate() + 7);
     d.setHours(9, 0, 0, 0);
     result.date = d;
-    result.title = result.title.replace(/next week/gi, '');
+    result.title = result.title.replace(/next week|на след неделе/gi, '');
   }
 
   // 3. Cleanup spaces

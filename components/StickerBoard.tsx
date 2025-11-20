@@ -1,3 +1,4 @@
+
 import React, { useState, useRef, useEffect } from 'react';
 import { Note } from '../types';
 import { generateId } from '../utils';
@@ -60,36 +61,46 @@ const StickerBoard: React.FC<StickerBoardProps> = ({ notes, setNotes }) => {
     setNotes(prev => prev.map(n => n.id === id ? { ...n, zIndex: maxZ + 1 } : n));
   };
 
-  const handleMouseDown = (e: React.MouseEvent, note: Note) => {
+  // --- DRAG LOGIC (MOUSE & TOUCH) ---
+
+  const startDrag = (clientX: number, clientY: number, note: Note, target: Element) => {
     if (!boardRef.current) return;
-    const rect = (e.target as Element).closest('.sticker-note')?.getBoundingClientRect();
+    const rect = target.closest('.sticker-note')?.getBoundingClientRect();
     if (!rect) return;
 
     setDraggingId(note.id);
     setDragOffset({
-      x: e.clientX - rect.left,
-      y: e.clientY - rect.top
+      x: clientX - rect.left,
+      y: clientY - rect.top
     });
     bringToFront(note.id);
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
-    if (!draggingId || !boardRef.current) return;
+  const moveDrag = (clientX: number, clientY: number) => {
+     if (!draggingId || !boardRef.current) return;
     
     const boardRect = boardRef.current.getBoundingClientRect();
-    const x = e.clientX - boardRect.left - dragOffset.x;
-    const y = e.clientY - boardRect.top - dragOffset.y;
+    const x = clientX - boardRect.left - dragOffset.x;
+    const y = clientY - boardRect.top - dragOffset.y;
 
     setNotes(prev => prev.map(n => 
       n.id === draggingId ? { ...n, x, y } : n
     ));
   };
 
-  const handleMouseUp = () => {
+  const endDrag = () => {
     setDraggingId(null);
   };
 
+  // MOUSE EVENTS
+  const handleMouseDown = (e: React.MouseEvent, note: Note) => {
+    startDrag(e.clientX, e.clientY, note, e.target as Element);
+  };
+
   useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => moveDrag(e.clientX, e.clientY);
+    const handleMouseUp = () => endDrag();
+
     if (draggingId) {
       window.addEventListener('mousemove', handleMouseMove);
       window.addEventListener('mouseup', handleMouseUp);
@@ -98,10 +109,35 @@ const StickerBoard: React.FC<StickerBoardProps> = ({ notes, setNotes }) => {
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingId]);
+  }, [draggingId, dragOffset]);
+
+  // TOUCH EVENTS
+  const handleTouchStart = (e: React.TouchEvent, note: Note) => {
+      if (e.touches.length !== 1) return;
+      // Prevent scrolling body while dragging note
+      document.body.style.overflow = 'hidden';
+      startDrag(e.touches[0].clientX, e.touches[0].clientY, note, e.target as Element);
+  };
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+      if (draggingId && e.touches.length === 1) {
+          // Prevent scrolling while dragging
+          e.preventDefault(); 
+          moveDrag(e.touches[0].clientX, e.touches[0].clientY);
+      }
+  };
+
+  const handleTouchEnd = () => {
+      document.body.style.overflow = ''; // Restore scrolling
+      endDrag();
+  };
 
   return (
-    <div className="h-full flex flex-col relative overflow-hidden bg-slate-50">
+    <div 
+        className="h-full flex flex-col relative overflow-hidden bg-slate-50 touch-none" 
+        onTouchMove={handleTouchMove} 
+        onTouchEnd={handleTouchEnd}
+    >
       {/* Dot Pattern Background */}
       <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'radial-gradient(#000 1px, transparent 1px)', backgroundSize: '24px 24px' }}></div>
 
@@ -153,7 +189,7 @@ const StickerBoard: React.FC<StickerBoardProps> = ({ notes, setNotes }) => {
             className={`
               sticker-note absolute rounded-lg shadow-[0_10px_30px_-10px_rgba(0,0,0,0.15)] flex flex-col overflow-hidden border transition-transform
               ${note.color} 
-              ${draggingId === note.id ? 'cursor-grabbing scale-[1.02] shadow-[0_20px_40px_-10px_rgba(0,0,0,0.25)]' : 'cursor-grab'}
+              ${draggingId === note.id ? 'cursor-grabbing scale-[1.02] shadow-[0_20px_40px_-10px_rgba(0,0,0,0.25)] z-50' : 'cursor-grab'}
             `}
             style={{
               left: note.x,
@@ -169,9 +205,16 @@ const StickerBoard: React.FC<StickerBoardProps> = ({ notes, setNotes }) => {
                     bringToFront(note.id);
                 }
             }}
+            onTouchStart={(e) => {
+                if ((e.target as Element).closest('.drag-handle')) {
+                    handleTouchStart(e, note);
+                } else {
+                    bringToFront(note.id);
+                }
+            }}
           >
             {/* Header / Drag Handle */}
-            <div className="drag-handle h-10 flex items-center justify-between px-3 shrink-0 select-none group relative">
+            <div className="drag-handle h-10 flex items-center justify-between px-3 shrink-0 select-none group relative touch-none">
               {/* Subtle darken overlay for header area */}
               <div className="absolute inset-0 bg-black/5 pointer-events-none"></div>
               
@@ -201,6 +244,7 @@ const StickerBoard: React.FC<StickerBoardProps> = ({ notes, setNotes }) => {
                 onChange={(e) => updateNoteContent(note.id, e.target.value)}
                 placeholder={t('notes.placeholder')}
                 onMouseDown={(e) => e.stopPropagation()}
+                onTouchStart={(e) => e.stopPropagation()} // Allow typing to focus properly
                 spellCheck={false}
               />
             )}

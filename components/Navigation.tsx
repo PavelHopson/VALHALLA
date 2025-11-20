@@ -69,7 +69,10 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, setView, onSearchC
                 }`}
               >
                 <Icon className={`w-5 h-5 transition-transform duration-300 ${isActive ? 'scale-110' : 'group-hover:scale-110'}`} />
-                <span className="font-medium tracking-wide text-sm">{item.label}</span>
+                <div className="flex flex-col items-start">
+                   <span className="font-bold tracking-wide text-sm">{item.label.split('(')[0]}</span>
+                   <span className="text-[10px] opacity-60 font-medium">{item.label.split('(')[1]?.replace(')', '')}</span>
+                </div>
               </button>
             );
           })}
@@ -97,9 +100,9 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, setView, onSearchC
         </div>
       </div>
 
-      {/* Mobile Bottom Nav */}
-      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white dark:bg-slate-950 border-t border-slate-200 dark:border-slate-800 z-50 pb-safe">
-         <div className="flex items-center justify-around px-2 py-3 overflow-x-auto">
+      {/* Mobile Bottom Nav - Glassmorphism & Safe Area */}
+      <div className="md:hidden fixed bottom-0 left-0 right-0 bg-white/90 dark:bg-slate-950/90 backdrop-blur-lg border-t border-slate-200 dark:border-slate-800 z-50 pb-safe transition-all">
+         <div className="flex items-center justify-around px-1 pt-2 pb-1">
             {navItems.slice(0, 5).map((item) => {
                 const isActive = currentView === item.id;
                 const Icon = item.icon;
@@ -107,12 +110,17 @@ const Navigation: React.FC<NavigationProps> = ({ currentView, setView, onSearchC
                     <button
                         key={item.id}
                         onClick={() => setView(item.id as ViewMode)}
-                        className={`flex flex-col items-center gap-1 p-2 rounded-lg transition-all min-w-[64px] ${
-                            isActive ? `text-${theme.primary.replace('bg-', '')}-600 dark:text-white` : 'text-slate-400'
+                        className={`flex flex-col items-center justify-center gap-1 p-2 rounded-xl transition-all flex-1 active:scale-95 ${
+                            isActive ? `text-${theme.primary.replace('bg-', '')}-600 dark:text-white` : 'text-slate-400 dark:text-slate-500'
                         }`}
                     >
-                        <Icon className={`w-6 h-6 ${isActive ? 'fill-current' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
-                        <span className="text-[10px] font-medium truncate max-w-[64px]">{item.label.split(' ')[0]}</span>
+                        <div className={`relative ${isActive ? '-translate-y-0.5' : ''} transition-transform`}>
+                            <Icon className={`w-6 h-6 ${isActive ? 'fill-current opacity-20' : ''}`} strokeWidth={isActive ? 2.5 : 2} />
+                            {isActive && <div className={`absolute -bottom-2 left-1/2 -translate-x-1/2 w-1 h-1 rounded-full ${theme.primary}`}></div>}
+                        </div>
+                        <span className={`text-[9px] font-medium truncate max-w-[64px] ${isActive ? 'opacity-100' : 'opacity-70'}`}>
+                            {item.label.split('(')[0]}
+                        </span>
                     </button>
                 );
             })}
